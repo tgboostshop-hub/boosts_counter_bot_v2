@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties  # ← ВОТ ЭТО ДОЛЖНО БЫТЬ
 
 from texts import *
 from logic import full_table
