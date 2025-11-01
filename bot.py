@@ -39,9 +39,12 @@ async def start_broadcast(m: Message):
 async def calc(m: Message):
     subs = int(m.text.strip())
     table = full_table(subs)
-    lines = [HEADER.format(subs=subs)]
+     lines = [HEADER.format(subs=subs)]
+    # уровни 1..10
     for lvl in range(1, 11):
         lines.append(TEMPLATE_ROW.format(level=lvl, value=table[lvl]))
+    # дополнительно уровень 50
+    lines.append(TEMPLATE_ROW.format(level=50, value=full_table(subs, [50])[50]))
     text = "\n".join(lines)
     await m.answer(text)
 
