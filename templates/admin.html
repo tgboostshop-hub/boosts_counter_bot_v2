@@ -1,0 +1,67 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Админка — Boosts Counter</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0b12; color:#eaeafb; }
+    .wrap { max-width: 960px; margin: 20px auto; padding: 16px; }
+    .card { background:#141428; border-radius:16px; padding:16px; margin-bottom:16px; }
+    table { width:100%; border-collapse: collapse; }
+    td, th { padding:8px 10px; border-bottom:1px solid #333; }
+    input, textarea, button { width:100%; padding:10px; border-radius:10px; border:1px solid #444; background:#0f0f1e; color:#fff; }
+    button { cursor:pointer; background:#2f2fff; border: none; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    @media (max-width: 720px){ .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Админ-панель</h1>
+    <div class="grid">
+      <div class="card">
+        <h3>Сводка</h3>
+        <p>Пользователей: <b>{{ total_users }}</b></p>
+        <p>Расчётов: <b>{{ total_calcs }}</b></p>
+      </div>
+      <div class="card">
+        <h3>Рассылка</h3>
+        <form method="post" action="/admin/broadcast">
+          <textarea name="text" rows="4" placeholder="Текст рассылки..."></textarea>
+          <button type="submit">Отправить всем пользователям</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Активность за 30 дней</h3>
+      <canvas id="chart1"></canvas>
+    </div>
+
+    <div class="card">
+      <h3>Топ пользователей</h3>
+      <table>
+        <tr><th>Пользователь</th><th>Расчётов</th></tr>
+        {% for u, c in top %}
+        <tr><td>@{{ u or "—" }}</td><td>{{ c }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+
+<script>
+  const ctx = document.getElementById('chart1').getContext('2d');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: {{ labels | tojson }},
+      datasets: [{ label: 'Расчётов в день', data: {{ values | tojson }} }]
+    },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  });
+</script>
+</body>
+</html>
