@@ -55,7 +55,7 @@ async def fallback(m: Message):
     await m.answer(ERROR_NOT_NUMBER)
 
 def make_bot() -> tuple[Bot, Dispatcher]:
-    bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
+    bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     dp.include_router(router)
     return bot, dp
