@@ -5,7 +5,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from aiogram.types import Update
 from aiogram import Bot
-from aiogram.dispatcher.webhook.aiohttp_server import SimpleRequestHandler
 from itsdangerous import Signer
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy.ext.asyncio import AsyncSession
