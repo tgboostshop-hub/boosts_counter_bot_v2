@@ -1,18 +1,24 @@
+import os, json, asyncio, random
+from datetime import datetime, timedelta
 
-import os, json, asyncio
+import aiohttp
 from fastapi import FastAPI, Request, Depends, HTTPException, status, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
 from aiogram.types import Update
-from aiogram import Bot
 from itsdangerous import Signer
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+
 from db import SessionLocal, init_db, User, CalcLog
 from bot import make_bot, router, ADMIN_IDS
 from logic import full_table
 
+
+# -------------------- Конфиг --------------------
 security = HTTPBasic()
 templates = Environment(
     loader=FileSystemLoader("templates"),
@@ -23,19 +29,73 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 BASE_URL = os.getenv("BASE_URL", "").rstrip("/")
 WEBHOOK_SECRET_PATH = os.getenv("WEBHOOK_SECRET_PATH", "/webhook/secret-path")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
+KEEPALIVE_ENABLED = os.getenv("KEEPALIVE_ENABLED", "1")  # "0" чтобы отключить
 
 app = FastAPI(title="Boosts Counter Bot")
 
+# aiogram
 bot, dp = make_bot()
 
+
+# -------------------- Keep-Alive --------------------
+async def _keepalive_loop(base_url: str, interval_sec: int = 300):
+    """Периодически шлёт GET на /ping, чтобы сервис не усыплялся."""
+    url = f"{base_url}/ping"
+    # небольшой стартовый сдвиг
+    await asyncio.sleep(5)
+    while True:
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                    _ = await r.text()
+                    print(f"[keepalive] {r.status} GET {url}")
+        except Exception as e:
+            print(f"[keepalive] error: {e}")
+        # интервал с лёгким джиттером, но не меньше 60с
+        jitter = random.uniform(-15, 15)
+        await asyncio.sleep(max(60, interval_sec + jitter))
+
+
+# -------------------- Жизненный цикл --------------------
 @app.on_event("startup")
 async def on_startup():
+    # БД
     await init_db()
+
+    # Вебхук (если BASE_URL задан)
     if BASE_URL:
-        await bot.set_webhook(f"{BASE_URL}{WEBHOOK_SECRET_PATH}")
+        try:
+            await bot.set_webhook(f"{BASE_URL}{WEBHOOK_SECRET_PATH}")
+            print(f"[webhook] set to {BASE_URL}{WEBHOOK_SECRET_PATH}")
+        except Exception as e:
+            print(f"[webhook] set error: {e}")
     else:
         print("BASE_URL не задан — вебхук не выставлен (используйте polling или задайте BASE_URL).")
 
+    # Keep-Alive
+    if KEEPALIVE_ENABLED != "0" and BASE_URL:
+        try:
+            app.state.keepalive_task = asyncio.create_task(_keepalive_loop(BASE_URL))
+            print("[keepalive] started")
+        except Exception as e:
+            print(f"[keepalive] start error: {e}")
+    else:
+        print("[keepalive] disabled (set BASE_URL and KEEPALIVE_ENABLED!=0 to enable)")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    # аккуратно гасим фоновую задачу
+    task = getattr(app.state, "keepalive_task", None)
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+# -------------------- Telegram webhook --------------------
 @app.post(WEBHOOK_SECRET_PATH)
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -43,27 +103,36 @@ async def telegram_webhook(request: Request):
     await dp.feed_update(bot, update)
     return {"ok": True}
 
+
+# -------------------- Админка --------------------
 def check_admin(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = credentials.username == "admin"
     correct_password = credentials.password == ADMIN_PASSWORD
     if not (correct_username and correct_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, headers={"WWW-Authenticate": "Basic"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            headers={"WWW-Authenticate": "Basic"},
+        )
     return True
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
     tpl = templates.get_template("index.html")
     return tpl.render()
 
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_panel(auth: bool = Depends(check_admin)):
     async with SessionLocal() as session:
-        # totals
-        total_users = (await session.execute(select(func.count()).select_from(User))).scalar_one()
-        total_calcs = (await session.execute(select(func.count()).select_from(CalcLog))).scalar_one()
+        total_users = (await session.execute(
+            select(func.count()).select_from(User)
+        )).scalar_one()
 
-        # daily activity last 30 days
-        from datetime import datetime, timedelta
+        total_calcs = (await session.execute(
+            select(func.count()).select_from(CalcLog)
+        )).scalar_one()
+
         since = datetime.utcnow() - timedelta(days=30)
         rows = (await session.execute(
             select(func.date(CalcLog.created_at), func.count())
@@ -74,7 +143,6 @@ async def admin_panel(auth: bool = Depends(check_admin)):
         labels = [str(r[0]) for r in rows]
         values = [r[1] for r in rows]
 
-        # top users
         top = (await session.execute(
             select(User.username, func.count(CalcLog.id))
             .join(CalcLog, CalcLog.user_id == User.id)
@@ -84,13 +152,20 @@ async def admin_panel(auth: bool = Depends(check_admin)):
         )).all()
 
     tpl = templates.get_template("admin.html")
-    return tpl.render(total_users=total_users, total_calcs=total_calcs,
-                      labels=labels, values=values, top=top)
+    return tpl.render(
+        total_users=total_users,
+        total_calcs=total_calcs,
+        labels=labels,
+        values=values,
+        top=top,
+    )
+
 
 @app.post("/admin/broadcast", response_class=HTMLResponse)
 async def admin_broadcast(text: str = Form(...), auth: bool = Depends(check_admin)):
     async with SessionLocal() as session:
         users = (await session.execute(select(User.tg_id))).scalars().all()
+
     ok = 0
     for uid in users:
         try:
@@ -98,15 +173,16 @@ async def admin_broadcast(text: str = Form(...), auth: bool = Depends(check_admi
             ok += 1
         except Exception:
             pass
+
     tpl = templates.get_template("broadcast_done.html")
     return tpl.render(ok=ok, total=len(users))
 
-# --- Добавляем после всех остальных маршрутов ---
-from fastapi.responses import PlainTextResponse
 
+# -------------------- Health / Ping --------------------
 @app.get("/ping", response_class=PlainTextResponse)
 async def ping():
     return "pong"
+
 
 @app.get("/healthz", response_class=PlainTextResponse)
 async def healthz():
