@@ -101,3 +101,13 @@ async def admin_broadcast(text: str = Form(...), auth: bool = Depends(check_admi
     tpl = templates.get_template("broadcast_done.html")
     return tpl.render(ok=ok, total=len(users))
 
+# --- Добавляем после всех остальных маршрутов ---
+from fastapi.responses import PlainTextResponse
+
+@app.get("/ping", response_class=PlainTextResponse)
+async def ping():
+    return "pong"
+
+@app.get("/healthz", response_class=PlainTextResponse)
+async def healthz():
+    return "ok"
