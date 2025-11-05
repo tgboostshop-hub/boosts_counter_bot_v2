@@ -74,7 +74,7 @@ async def calc(m: Message):
     await m.answer(text)
 
     # Сообщение о покупке бустов
-    await m.answer("💥 Купить бусты можете на нашем оф. сайте:\n👉 https://tgboost.shop")
+    await m.answer("💥 Купить в нашем оф. боте:\n👉 @boostceo_bot")
 
     # Логируем расчёт в БД
     async with SessionLocal() as session:  # type: AsyncSession
